@@ -1,0 +1,19 @@
+﻿#pragma kernel SampleTexture
+
+Texture2D reader;
+RWStructuredBuffer<uint> result;
+//RWTexture2D<float4> writer;
+int width, height;
+SamplerState MyPointRepeatSampler;
+
+[numthreads(32, 32, 1)]
+void SampleTexture(uint3 id : SV_DispatchThreadID)
+{
+	//float4 color = reader.SampleLevel(MyPointRepeatSampler, float2(((width-(float)id.x) )/ width, ((height-(float)id.y)) / height), 0);
+	float4 color = reader.SampleLevel(MyPointRepeatSampler, float2(((width-(float)id.x + 0.5) )/ width, ((height-(float)id.y + 0.5)) / height), 0);
+	//float4 color = reader.SampleLevel(MyPointRepeatSampler, float2(id.x / width, id.y / height), 0);
+	color *= 255.0; 
+	// ParticleBuffer[(id.y * width) + id.x].color = color;
+	result[(id.y * width) + id.x] = ((int)color.r << 16) | ((int)color.g << 8) | ((int) color.b);
+	//writer[id.xy] = color;
+}
