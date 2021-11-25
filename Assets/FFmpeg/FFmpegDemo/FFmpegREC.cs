@@ -40,7 +40,7 @@ namespace FFmpeg.Demo.REC
         IRecAudio soundRecorder;
         Texture2D frameBuffer;
 
-        private const int MAX_FREAME_LEN = 100;
+        private const int MAX_FREAME_LEN = 600;
         string[] videoStrInfos = new string[MAX_FREAME_LEN];
 
         //Paths
@@ -137,15 +137,15 @@ namespace FFmpeg.Demo.REC
                 camRect = new Rect(0, 0, width, height);
                 startTime = Time.time;
                 framesCount = 0;
-                frameInterval = 2.0f / FPS;
+                frameInterval = 3.0f / FPS;
                 frameTimer = frameInterval;
 
                 isREC = true;
 
-                // if (recAudioSource != RecAudioSource.None)
-                // {
-                //     soundRecorder.StartRecording();
-                // }
+                if (recAudioSource != RecAudioSource.None)
+                {
+                    soundRecorder.StartRecording();
+                }
             }
         }
 
@@ -159,10 +159,10 @@ namespace FFmpeg.Demo.REC
 
             Debug.Log("Actual FPS: " + actualFPS);
 
-            // if (recAudioSource != RecAudioSource.None)
-            // {
-            //     soundRecorder.StopRecording(soundPath);
-            // }
+            if (recAudioSource != RecAudioSource.None)
+            {
+                soundRecorder.StopRecording(soundPath);
+            }
 
             CompressData();
 
@@ -190,12 +190,16 @@ namespace FFmpeg.Demo.REC
 
         private void OnGUI()
         {
-            if (GUILayout.Button("UnZipAndEncode"))
+            if (GUI.Button(new Rect(0, 30, 120, 40), "UnZipAndEncode"))
             {
                 // 解压
                 UnZipDir();
                 // 转换成图片
                 ChangeByteToTexture();
+            }
+
+            if (GUI.Button(new Rect(0, 70, 120, 40), "CreateVideo"))
+            {
                 // 创建视频 
                 CreateVideo();
             }
@@ -212,6 +216,12 @@ namespace FFmpeg.Demo.REC
 
             foreach (FileInfo file in folder.GetFiles())
             {
+                if (file.FullName.EndsWith(".wav"))
+                {
+                    File.Copy(file.FullName, file.FullName.Replace("TempResult", "RecordingCash"));
+                    continue;
+                }
+
                 var rawBt = File.ReadAllBytes(file.FullName);
                 var bt = TestByteAttay.gzipDecompress(rawBt);
                 var index = 0;
@@ -435,18 +445,17 @@ namespace FFmpeg.Demo.REC
 
         void CreateVideo()
         {
-            return;
             StringBuilder command = new StringBuilder();
 
-            Debug.Log("firstImgFilePath: " + firstImgFilePath);
-            Debug.Log("soundPath: " + soundPath);
-            Debug.Log("outputVideoPath: " + outputVideoPath);
+            // Debug.Log("firstImgFilePath: " + firstImgFilePath);
+            // Debug.Log("soundPath: " + soundPath);
+            // Debug.Log("outputVideoPath: " + outputVideoPath);
 
             //Input Image sequence params
             command.Append("-y -framerate ").Append(actualFPS.ToString()).Append(" -f image2 -i ")
                 .Append(AddQuotation(firstImgFilePath));
 
-            //Input Audio params
+            // //Input Audio params
             if (recAudioSource != RecAudioSource.None)
             {
                 command.Append(" -i ").Append(AddQuotation(soundPath)).Append(" -ss 0 -t ").Append(totalTime);
@@ -455,15 +464,9 @@ namespace FFmpeg.Demo.REC
             //Output Video params
             command.Append(" -vcodec libx264 -crf 25 -pix_fmt yuv420p ").Append(AddQuotation(outputVideoPath));
 
-            Debug.Log(command.ToString());
+            // Debug.Log(command.ToString());
 
             FFmpegCommands.DirectInput(command.ToString());
-
-
-            // if (renderTexture != null)
-            // {
-            //     RenderTexture.ReleaseTemporary(renderTexture);
-            // }
         }
 
         private void WriteTexture()
