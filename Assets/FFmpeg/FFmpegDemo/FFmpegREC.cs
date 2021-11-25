@@ -1,10 +1,14 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Configuration;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
 using Ionic.Zip;
 using UnityEditor;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 using FileMode = System.IO.FileMode;
 
 namespace FFmpeg.Demo.REC
@@ -36,7 +40,7 @@ namespace FFmpeg.Demo.REC
         IRecAudio soundRecorder;
         Texture2D frameBuffer;
 
-        private const int MAX_FREAME_LEN = 1200;
+        private const int MAX_FREAME_LEN = 100;
         string[] videoStrInfos = new string[MAX_FREAME_LEN];
 
         //Paths
@@ -55,6 +59,9 @@ namespace FFmpeg.Demo.REC
         int initialWidth, initialHeight;
         public bool overrideResolution { get { return width > 0 || height > 0; } }
 #endif
+
+        public static readonly int CONST_WIDTH = 600;
+        public static readonly int CONST_HEIGTH = 400;
 
         //References
         Action<string> onOutput, onFinish;
@@ -104,7 +111,7 @@ namespace FFmpeg.Demo.REC
             pixels = new uint[width * height];
             buffer = new ComputeBuffer(width * height, 4);
             bytes = new byte[pixels.Length * 4];
-            texture = new Texture2D(width, height, TextureFormat.RGB24, false);
+            texture = new Texture2D(width, height, TextureFormat.RGB565, false);
         }
 
         void Clear()
@@ -123,39 +130,22 @@ namespace FFmpeg.Demo.REC
                 Directory.CreateDirectory(cashDir);
                 Debug.Log("CashDir created: " + cashDir);
 
-#if !UNITY_EDITOR
-                if (overrideResolution)
-                {
-                    //Low level operation of resolution change
-                    Screen.SetResolution(width, height, Screen.fullScreen);
-                }
-                else
-#endif
-                {
-                    width = (Screen.width / 2) * 2;
-                    height = (Screen.height / 2) * 2;
-                }
-
-
-                if (renderTexture == null)
-                {
-                    renderTexture = RenderTexture.GetTemporary(width, height, 0);
-                }
-
+                width = (Screen.width / 2) * 2;
+                height = (Screen.height / 2) * 2;
 
                 frameBuffer = new Texture2D(width, height, TextureFormat.RGB24, false, true);
                 camRect = new Rect(0, 0, width, height);
                 startTime = Time.time;
                 framesCount = 0;
-                frameInterval = 1.0f / FPS;
+                frameInterval = 2.0f / FPS;
                 frameTimer = frameInterval;
 
                 isREC = true;
 
-                if (recAudioSource != RecAudioSource.None)
-                {
-                    soundRecorder.StartRecording();
-                }
+                // if (recAudioSource != RecAudioSource.None)
+                // {
+                //     soundRecorder.StartRecording();
+                // }
             }
         }
 
@@ -169,20 +159,14 @@ namespace FFmpeg.Demo.REC
 
             Debug.Log("Actual FPS: " + actualFPS);
 
-            if (recAudioSource != RecAudioSource.None)
-            {
-                soundRecorder.StopRecording(soundPath);
-            }
+            // if (recAudioSource != RecAudioSource.None)
+            // {
+            //     soundRecorder.StopRecording(soundPath);
+            // }
 
             CompressData();
 
             // CreateVideo();
-
-#if !UNITY_EDITOR
-            if (overrideResolution)
-                //Return to initial screen resolution
-                Screen.SetResolution(initialWidth, initialHeight, Screen.fullScreen);
-#endif
         }
 
         private void CompressData()
@@ -219,11 +203,17 @@ namespace FFmpeg.Demo.REC
 
         private void ChangeByteToTexture()
         {
-            DirectoryInfo folder = new DirectoryInfo(cashDir);
+            DirectoryInfo folder = new DirectoryInfo(Application.temporaryCachePath + "/TempResult");
+
+            if (!Directory.Exists(cashDir))
+            {
+                Directory.CreateDirectory(cashDir);
+            }
 
             foreach (FileInfo file in folder.GetFiles())
             {
-                var bt = File.ReadAllBytes(file.FullName);
+                var rawBt = File.ReadAllBytes(file.FullName);
+                var bt = TestByteAttay.gzipDecompress(rawBt);
                 var index = 0;
                 for (int j = height; j > 0; j--)
                 {
@@ -232,13 +222,13 @@ namespace FFmpeg.Demo.REC
                         var b = bt[index++];
                         var g = bt[index++];
                         var r = bt[index++];
-                        var a = bt[index++];
-                        var color = new Color(r, g, b, a) / 255.0f;
+                        var color = new Color(r, g, b) / 255.0f;
                         texture.SetPixel(i, j, color);
                     }
                 }
 
-                File.WriteAllBytes(file.FullName + ".jpg", texture.EncodeToJPG());
+                File.WriteAllBytes(file.FullName.Replace("TempResult", "RecordingCash") + ".jpg",
+                    texture.EncodeToJPG());
             }
         }
 
@@ -355,13 +345,53 @@ namespace FFmpeg.Demo.REC
 
             buffer.GetData(pixels);
 
+            // WritePic();
             System.Threading.Tasks.Task.Factory.StartNew(() =>
             {
                 Buffer.BlockCopy(pixels, 0, bytes, 0, pixels.Length * 4);
 
-                File.WriteAllBytes(String.Format(imgFilePathFormat, framesCount), bytes);
-                // ByteCompress.LzmaCompress(bytes);
+                List<byte> arrBt = new List<byte>(bytes.Length * 3 / 4);
+
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    if ((i + 1) % 4 == 0)
+                    {
+                        continue;
+                    }
+
+                    arrBt.Add(bytes[i]);
+                }
+                // Stopwatch sw = new Stopwatch();
+                // sw.Start();
+
+                File.WriteAllBytes(String.Format(imgFilePathFormat, framesCount),
+                    TestByteAttay.gzipCompress(arrBt.ToArray()));
+                // sw.Stop();
+                // Debug.Log(sw.ElapsedMilliseconds);
             });
+        }
+
+        private void WritePic()
+        {
+            var index = 0;
+            var inteval = width * height / 240000;
+            // Debug.Log(inteval);
+            for (int j = CONST_HEIGTH; j > 0; j--)
+            {
+                for (int i = CONST_WIDTH; i > 0; i--)
+                {
+                    var pixel = pixels[index];
+                    var r = pixel >> 16;
+                    var g = (pixel >> 8) - (r << 8);
+                    var b = pixel - ((pixel >> 8) << 8);
+                    var color = new Color(r, g, b) / 255.0f;
+                    texture.SetPixel(i, j, color);
+
+                    index += inteval;
+                }
+            }
+
+            File.WriteAllBytes(String.Format(imgFilePathFormat, framesCount) + ".jpg", texture.EncodeToJPG());
         }
 
         private string NextImgFilePath()
@@ -386,12 +416,14 @@ namespace FFmpeg.Demo.REC
             {
                 // 设置解压密码
                 zip.Password = "HLMJ123456";
-                zip.ExtractAll(cashDir);
+                zip.ExtractAll(Application.temporaryCachePath + "/TempResult");
             }
         }
 
         void CreateVideo()
         {
+            
+            return;
             StringBuilder command = new StringBuilder();
 
             Debug.Log("firstImgFilePath: " + firstImgFilePath);
