@@ -348,26 +348,39 @@ namespace FFmpeg.Demo.REC
             // WritePic();
             System.Threading.Tasks.Task.Factory.StartNew(() =>
             {
-                Buffer.BlockCopy(pixels, 0, bytes, 0, pixels.Length * 4);
-
-                List<byte> arrBt = new List<byte>(bytes.Length * 3 / 4);
-
-                for (int i = 0; i < bytes.Length; i++)
-                {
-                    if ((i + 1) % 4 == 0)
-                    {
-                        continue;
-                    }
-
-                    arrBt.Add(bytes[i]);
-                }
                 // Stopwatch sw = new Stopwatch();
                 // sw.Start();
+                // Buffer.BlockCopy(pixels, 0, bytes, 0, pixels.Length * 4);
+
+                // List<byte> arrBt = new List<byte>(bytes.Length * 3 / 4);
+                //
+                // for (int i = 0; i < bytes.Length; i++)
+                // {
+                //     if ((i + 1) % 4 == 0)
+                //     {
+                //         continue;
+                //     }
+                //
+                //     arrBt.Add(bytes[i]);
+                // }
+
+                List<byte> arrBt = new List<byte>(bytes.Length * 3 / 4);
+                for (int i = 0; i < pixels.Length; i++)
+                {
+                    var pixel = pixels[i];
+                    var r = pixel >> 16;
+                    var g = (pixel >> 8) - (r << 8);
+                    var b = pixel - ((pixel >> 8) << 8);
+                    arrBt.Add((byte) b);
+                    arrBt.Add((byte) g);
+                    arrBt.Add((byte) r);
+                }
+
+                // sw.Stop();
+                // Debug.Log(sw.ElapsedMilliseconds);
 
                 File.WriteAllBytes(String.Format(imgFilePathFormat, framesCount),
                     TestByteAttay.gzipCompress(arrBt.ToArray()));
-                // sw.Stop();
-                // Debug.Log(sw.ElapsedMilliseconds);
             });
         }
 
@@ -422,7 +435,6 @@ namespace FFmpeg.Demo.REC
 
         void CreateVideo()
         {
-            
             return;
             StringBuilder command = new StringBuilder();
 
