@@ -15,5 +15,6 @@ void SampleTexture(uint3 id : SV_DispatchThreadID)
 	color *= 255.0; 
 	// ParticleBuffer[(id.y * width) + id.x].color = color;
 	result[(id.y * width) + id.x] = ((int)color.r << 16) | ((int)color.g << 8) | ((int) color.b);
+	// result[(id.y * width) + id.x] = (((int)color.r >> 3) << 11) | (((int)color.g >> 2) << 5) | ((int) color.b >> 3);
 	//writer[id.xy] = color;
 }
