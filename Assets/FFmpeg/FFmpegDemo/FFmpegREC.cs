@@ -5,9 +5,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using Ionic.Zip;
 using UnityEditor;
+using UnityEditor.Media;
 using UnityEngine;
+using UnityEngine.Collections;
 using Debug = UnityEngine.Debug;
 using FileMode = System.IO.FileMode;
 
@@ -27,6 +30,8 @@ namespace FFmpeg.Demo.REC
         private byte[] bytes;
         int width = Screen.width, height = Screen.height;
 
+        private int kernel;
+
         //Data
         [Header("Targeted FPS")] public int FPS = 30;
         float actualFPS;
@@ -40,7 +45,7 @@ namespace FFmpeg.Demo.REC
         IRecAudio soundRecorder;
         Texture2D frameBuffer;
 
-        private const int MAX_FREAME_LEN = 600;
+        private const int MAX_FREAME_LEN = 640;
         string[] videoStrInfos = new string[MAX_FREAME_LEN];
 
         //Paths
@@ -108,6 +113,8 @@ namespace FFmpeg.Demo.REC
 
         private void InitCS()
         {
+            //找到GPU真正执行的方法在computeShader里的索引
+            kernel = shader.FindKernel("SampleTexture");
             pixels = new uint[width * height];
             buffer = new ComputeBuffer(width * height, 4);
             bytes = new byte[pixels.Length * 4];
@@ -204,7 +211,7 @@ namespace FFmpeg.Demo.REC
                 CreateVideo();
             }
         }
-
+        
         private void ChangeByteToTexture()
         {
             DirectoryInfo folder = new DirectoryInfo(Application.temporaryCachePath + "/TempResult");
@@ -287,6 +294,7 @@ namespace FFmpeg.Demo.REC
         //     }
         // }
 
+        Stopwatch sw = new Stopwatch();
         private void OnRenderImage(RenderTexture src, RenderTexture dest)
         {
             if (isREC && (frameTimer += Time.deltaTime) > frameInterval)
@@ -297,16 +305,10 @@ namespace FFmpeg.Demo.REC
                     framesCount = 0;
                 }
 
-                var rtf = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGB565)
-                    ? RenderTextureFormat.RGB565
-                    : RenderTextureFormat.ARGB32;
-
-                var renderTexture = RenderTexture.GetTemporary(width, height, 0, rtf);
+                var renderTexture = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
                 Graphics.Blit(src, renderTexture);
-                RunShader(renderTexture);
-
+                CommitFrame(renderTexture);
                 framesCount++;
-
                 RenderTexture.ReleaseTemporary(renderTexture);
             }
 
@@ -336,12 +338,47 @@ namespace FFmpeg.Demo.REC
             return buffer;
         }
 
-        private void RunShader(RenderTexture renderTexture)
+        public void RecordMovie()
+        {
+            var videoAttr = new VideoTrackAttributes
+            {
+                frameRate = new MediaRational(50),
+                width = 320,
+                height = 200,
+                includeAlpha = false
+            };
+
+            var audioAttr = new AudioTrackAttributes
+            {
+                sampleRate = new MediaRational(48000),
+                channelCount = 2,
+                language = "fr"
+            };
+
+            int sampleFramesPerVideoFrame = audioAttr.channelCount *
+                audioAttr.sampleRate.numerator / videoAttr.frameRate.numerator;
+
+            var encodedFilePath = Path.Combine(Path.GetTempPath(), "my_movie.mp4");
+
+            Texture2D tex = new Texture2D((int) videoAttr.width, (int) videoAttr.height, TextureFormat.RGBA32, false);
+
+            using (var encoder = new MediaEncoder(encodedFilePath, videoAttr, audioAttr))
+            using (var audioBuffer = new NativeArray<float>(sampleFramesPerVideoFrame, Allocator.Temp))
+            {
+                for (int i = 0; i < 100; ++i)
+                {
+                    // Fill 'tex' with the video content to be encoded into the file
+                    encoder.AddFrame(tex);
+                    // Fill 'audioBuffer' with the audio content to be encoded 
+                    encoder.AddSamples(audioBuffer);
+                }
+            }
+        }
+
+        private void CommitFrame(RenderTexture renderTexture)
         {
             //把我们准备好的数据塞给Buffer里
             buffer.SetData(pixels);
-            //找到GPU真正执行的方法在computeShader里的索引
-            int kernel = shader.FindKernel("SampleTexture");
             //把我们之前准备好的buffer数据塞给computeShader，这样就建立了一个gpu到cpu的数据连接，gpu在计算时
             //会使用当前这个buffer里的数据。
             //注意：下面方法中的第二个参数 必须与 shader 里对应的那个 buffer 的变量名一模一样
@@ -349,31 +386,17 @@ namespace FFmpeg.Demo.REC
             shader.SetBuffer(kernel, "result", buffer);
             // shader.SetTexture(kernel, "writer", texture);
             shader.SetTexture(kernel, "reader", renderTexture);
-            shader.SetInt("width", width);
-            shader.SetInt("height", height);
+            // shader.SetInt("width", width);
+            // shader.SetInt("height", height);
             shader.Dispatch(kernel, width / 32, height / 32, 1);
 
             buffer.GetData(pixels);
-
-            // WritePic();
+            //
             System.Threading.Tasks.Task.Factory.StartNew(() =>
             {
                 // Stopwatch sw = new Stopwatch();
                 // sw.Start();
-                // Buffer.BlockCopy(pixels, 0, bytes, 0, pixels.Length * 4);
-
-                // List<byte> arrBt = new List<byte>(bytes.Length * 3 / 4);
-                //
-                // for (int i = 0; i < bytes.Length; i++)
-                // {
-                //     if ((i + 1) % 4 == 0)
-                //     {
-                //         continue;
-                //     }
-                //
-                //     arrBt.Add(bytes[i]);
-                // }
-
+            
                 List<byte> arrBt = new List<byte>(bytes.Length * 3 / 4);
                 for (int i = 0; i < pixels.Length; i++)
                 {
@@ -385,10 +408,9 @@ namespace FFmpeg.Demo.REC
                     arrBt.Add((byte) g);
                     arrBt.Add((byte) r);
                 }
-
                 // sw.Stop();
                 // Debug.Log(sw.ElapsedMilliseconds);
-
+            
                 File.WriteAllBytes(String.Format(imgFilePathFormat, framesCount),
                     TestByteAttay.gzipCompress(arrBt.ToArray()));
             });
@@ -447,24 +469,21 @@ namespace FFmpeg.Demo.REC
         {
             StringBuilder command = new StringBuilder();
 
-            // Debug.Log("firstImgFilePath: " + firstImgFilePath);
-            // Debug.Log("soundPath: " + soundPath);
-            // Debug.Log("outputVideoPath: " + outputVideoPath);
-
             //Input Image sequence params
-            command.Append("-y -framerate ").Append(actualFPS.ToString()).Append(" -f image2 -i ")
-                .Append(AddQuotation(firstImgFilePath));
-
-            // //Input Audio params
+            command.
+                // Append("-y -framerate ").
+                // Append(actualFPS.ToString()).
+                Append(" -f image2 -i ").Append(AddQuotation(firstImgFilePath)); // //Input Audio params
             if (recAudioSource != RecAudioSource.None)
             {
                 command.Append(" -i ").Append(AddQuotation(soundPath)).Append(" -ss 0 -t ").Append(totalTime);
             }
 
             //Output Video params
-            command.Append(" -vcodec libx264 -crf 25 -pix_fmt yuv420p ").Append(AddQuotation(outputVideoPath));
-
-            // Debug.Log(command.ToString());
+            command.Append(" -vcodec libx264 -crf 25 -pix_fmt yuv420p ")
+                .Append(AddQuotation(
+                    outputVideoPath));
+            // command.Append(" -vcodec libx264 -crf 25 -pix_fmt yuv420p ").Append(AddQuotation(outputVideoPath));
 
             FFmpegCommands.DirectInput(command.ToString());
         }
